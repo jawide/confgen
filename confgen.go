@@ -62,9 +62,13 @@ func main() {
 					if regexp.MustCompile(`^//\s*config\s+vars\s*$`).MatchString(text) {
 						n.Specs = []dst.Spec{}
 						for _, s := range v.AllKeys() {
+							t := "[]interface{}"
+							if reflect.TypeOf(v.Get(s)).Kind() != reflect.Slice {
+								t = reflect.TypeOf(v.Get(s)).Name()
+							}
 							n.Specs = append(n.Specs, &dst.ValueSpec{
 								Names: []*dst.Ident{dst.NewIdent(strings.ToUpper(s))},
-								Type:  dst.NewIdent(reflect.TypeOf(v.Get(s)).Name()),
+								Type:  dst.NewIdent(t),
 							})
 						}
 						break
@@ -195,25 +199,41 @@ func main() {
 						},
 					}
 					for _, s := range v.AllKeys() {
-						t := reflect.TypeOf(v.Get(s)).Name()
-						t = strings.ToUpper(t[:1]) + t[1:]
+						t := ""
+						c := dst.CallExpr{}
+						r := []dst.Expr{&dst.TypeAssertExpr{
+							X: &c,
+							Type: &dst.ArrayType{
+								Elt: &dst.InterfaceType{
+									Methods: &dst.FieldList{
+										Opening: true,
+										Closing: true,
+									},
+									Incomplete: false,
+								},
+							},
+						}}
+						if reflect.TypeOf(v.Get(s)).Kind() != reflect.Slice {
+							t = reflect.TypeOf(v.Get(s)).Name()
+							t = strings.ToUpper(t[:1]) + t[1:]
+							r[0] = &c
+						}
+						c = dst.CallExpr{
+							Fun: &dst.SelectorExpr{
+								X:   dst.NewIdent("v"),
+								Sel: dst.NewIdent("Get" + t),
+							},
+							Args: []dst.Expr{
+								&dst.BasicLit{
+									Kind:  token.STRING,
+									Value: "\"" + s + "\"",
+								},
+							},
+						}
 						n.Body.List = append(n.Body.List, &dst.AssignStmt{
 							Lhs: []dst.Expr{dst.NewIdent(strings.ToUpper(s))},
 							Tok: token.ASSIGN,
-							Rhs: []dst.Expr{
-								&dst.CallExpr{
-									Fun: &dst.SelectorExpr{
-										X:   dst.NewIdent("v"),
-										Sel: dst.NewIdent("Get" + t),
-									},
-									Args: []dst.Expr{
-										&dst.BasicLit{
-											Kind:  token.STRING,
-											Value: "\"" + s + "\"",
-										},
-									},
-								},
-							},
+							Rhs: r,
 							Decs: dst.AssignStmtDecorations{
 								NodeDecs: dst.NodeDecs{
 									Before: dst.NewLine,
